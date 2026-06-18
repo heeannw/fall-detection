@@ -1,0 +1,22 @@
+venv/
+.venv/
+**/.venv/
+__pycache__/
+**/__pycache__/
+*.py[cod]
+.env
+.env.*
+!.env.example
+
+# Generated captures and training output
+captures/
+runs/
+
+# Local health records and machine-specific backups
+health_log.db
+*.bak
+*.bak[0-9]*
+
+# Contains local Wi-Fi credentials; keep a sanitized example separately
+/arduino/fall_sensor/fall_sensor.ino
+
