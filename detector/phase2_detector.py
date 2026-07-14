@@ -13,7 +13,7 @@ from pathlib import Path
 from detector.yolo_detector import model as yolo_model
 from detector.videomae_detector import processor as mae_processor, model as mae_model
 
-MODEL_PATH = Path(r"C:\fall-detection\phase2_features\xgboost_model.json")
+MODEL_PATH = Path(__file__).parent.parent / "phase2_features" / "xgboost_model.json"
 WINDOW = 8
 
 # extract_features.py와 동일한 keypoint 순서 (절대 바꾸면 안 됨!)

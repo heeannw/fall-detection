@@ -12,7 +12,7 @@ import time
 from datetime import datetime, timedelta
 from pathlib import Path
 
-DB_PATH = Path(r"C:\fall-detection\health_log.db")
+DB_PATH = Path(__file__).parent.parent / "health_log.db"
 LOG_INTERVAL = 60
 MIN_POINTS_FOR_SCORE = 30
 MIN_POINTS_RELIABLE = 120

@@ -1,7 +1,7 @@
 from ultralytics import YOLO
 import numpy as np
 
-model = YOLO(r"C:\fall-detection\runs\detect\fall_detection_v3\weights\best.pt")
+model = YOLO(r"C:\github\fall-detection\runs\detect\fall_detection_v3\weights\best.pt")
 
 def detect_fall_yolo(frame):
     results = model(frame, verbose=False)
