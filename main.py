@@ -96,6 +96,7 @@ def notify_spring_fall(metadata: dict):
                     "xgbProba":             metadata.get("xgb_proba", 0),
                     "cameraFall":           metadata.get("camera_fall", False),
                     "arduinoFall":          metadata.get("arduino_fall", False),
+                    "phoneFall":            metadata.get("phone_fall", False),
                 },
             },
             timeout=5,
@@ -156,6 +157,10 @@ fall_status = {
     "arduino_status": "DISCONNECTED",
     "arduino_port": ARDUINO_PORT,
     "arduino_last_line": None,
+    "phone_fall": False,
+    "phone_status": "NORMAL",
+    "phone_last_line": None,
+    "phone_battery": None,
     "score": 0,
     "last_capture": None,
     "battery": None,
@@ -441,7 +446,8 @@ def generate_frames():
 
         camera_fall = fall_detected
         arduino_fall = bool(fall_status.get("arduino_fall", False))
-        fall_detected = camera_fall or arduino_fall
+        phone_fall = bool(fall_status.get("phone_fall", False))
+        fall_detected = camera_fall or arduino_fall or phone_fall
 
         fall_status["fall_detected"] = fall_detected
         fall_status["camera_fall"] = camera_fall
@@ -488,6 +494,8 @@ def generate_frames():
                     "arduino_fall": arduino_fall,
                     "arduino_status": fall_status.get("arduino_status"),
                     "arduino_last_line": fall_status.get("arduino_last_line"),
+                    "phone_fall": phone_fall,
+                    "phone_status": fall_status.get("phone_status"),
                 }
             elif total_score > event_max_score:
                 # Replace the event frame if a clearer/higher-score frame appears.
@@ -510,6 +518,8 @@ def generate_frames():
                     "arduino_fall": arduino_fall,
                     "arduino_status": fall_status.get("arduino_status"),
                     "arduino_last_line": fall_status.get("arduino_last_line"),
+                    "phone_fall": phone_fall,
+                    "phone_status": fall_status.get("phone_status"),
                 }
 
             # Capture once per event after cooldown.
@@ -696,6 +706,24 @@ def arduino_status(payload: dict):
             pass
 
     return {"ok": True, "received": status}
+
+
+@app.post("/phone/status")
+def phone_status(payload: dict):
+    """폰 가속도계 낙상 감지(아두이노 대체): POST {"status": "FALL"} or {"status": "NORMAL"}"""
+    raw = str(payload.get("status", "")).upper().strip()
+    fall_status["phone_last_line"] = raw
+    fall_status["phone_status"] = raw
+    fall_status["phone_fall"] = raw.startswith("FALL")
+
+    battery = payload.get("battery")
+    if battery is not None:
+        try:
+            fall_status["phone_battery"] = int(round(float(battery)))
+        except (ValueError, TypeError):
+            pass
+
+    return {"ok": True, "received": raw}
 
 
 @app.get("/")
