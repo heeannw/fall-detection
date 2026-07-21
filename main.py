@@ -1,4 +1,5 @@
 ﻿from fastapi import FastAPI
+from fastapi import HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse, FileResponse
 import cv2
@@ -62,48 +63,60 @@ ARDUINO_MODE = os.environ.get("FALL_ARDUINO_MODE", "serial")
 # ============================================================
 SENIOR_ID   = int(os.environ.get("FALL_SENIOR_ID",   "53"))    # 김숙희 ID
 SPRING_URL  = os.environ.get("FALL_SPRING_URL",  "http://localhost:8082")
+FALL_ALERT_SPRING_URL = os.environ.get(
+    "FALL_ALERT_SPRING_URL", "http://localhost:8090"
+)
+PHONE_FALL_TTL_SEC = float(os.environ.get("FALL_PHONE_TTL_SEC", "10"))
+PHONE_DEVICE_ID = os.environ.get("FALL_PHONE_DEVICE_ID", "").strip()
+PHONE_FALL_FALLBACK_DELAY_SEC = float(
+    os.environ.get("FALL_PHONE_FALLBACK_DELAY_SEC", "1")
+)
 # 낙상 캡처 이미지 외부 접근 URL용 IP (Flutter 앱에서 이미지 접근 시 사용)
 FALL_SERVER_IP = os.environ.get("FALL_SERVER_IP", "172.28.6.250")
 import requests as _requests
 
-_spring_alert_cooldown = 0   # 마지막 Spring 알림 전송 시각
+_spring_alert_cooldowns = {}  # seniorId별 마지막 Spring 알림 전송 시각
+_spring_alert_lock = threading.Lock()
 SPRING_ALERT_COOLDOWN_SEC = 30  # 30초 쿨다운
 
 def notify_spring_fall(metadata: dict):
     """낙상 감지 시 Spring Boot POST /api/alerts/fall 전송"""
-    global _spring_alert_cooldown
-    now = time.time()
-    if now - _spring_alert_cooldown < SPRING_ALERT_COOLDOWN_SEC:
-        return
-    _spring_alert_cooldown = now
-    try:
-        capture_file = metadata.get("image", "")
-        image_url = f"http://{FALL_SERVER_IP}:8000/captures/{capture_file}" if capture_file else None
-        _requests.post(
-            f"{SPRING_URL}/api/alerts/fall",
-            json={
-                "seniorId":          SENIOR_ID,
-                "score":             int(metadata.get("score", 0)),
-                "imageUrl":          image_url,
-                "imageAccessUrl":    image_url,
-                "notifyGuardian":    True,
-                "notifyWelfare":     False,
-                "escalationRequired": metadata.get("accident_by_stillness", False),
-                "fallDetails": {
-                    "posture":              metadata.get("posture", "unknown"),
-                    "ensembleMode":         metadata.get("ensemble_mode", ""),
-                    "accidentByStillness":  metadata.get("accident_by_stillness", False),
-                    "xgbProba":             metadata.get("xgb_proba", 0),
-                    "cameraFall":           metadata.get("camera_fall", False),
-                    "arduinoFall":          metadata.get("arduino_fall", False),
-                    "phoneFall":            metadata.get("phone_fall", False),
+    senior_id = int(metadata.get("senior_id", SENIOR_ID))
+    with _spring_alert_lock:
+        now = time.time()
+        last_sent_at = _spring_alert_cooldowns.get(senior_id, 0)
+        if now - last_sent_at < SPRING_ALERT_COOLDOWN_SEC:
+            return
+        try:
+            capture_file = metadata.get("image", "")
+            image_url = f"http://{FALL_SERVER_IP}:8000/captures/{capture_file}" if capture_file else None
+            response = _requests.post(
+                f"{FALL_ALERT_SPRING_URL}/api/alerts/fall",
+                json={
+                    "seniorId":          senior_id,
+                    "score":             int(metadata.get("score", 0)),
+                    "imageUrl":          image_url,
+                    "imageAccessUrl":    image_url,
+                    "notifyGuardian":    True,
+                    "notifyWelfare":     False,
+                    "escalationRequired": metadata.get("accident_by_stillness", False),
+                    "fallDetails": {
+                        "posture":              metadata.get("posture", "unknown"),
+                        "ensembleMode":         metadata.get("ensemble_mode", ""),
+                        "accidentByStillness":  metadata.get("accident_by_stillness", False),
+                        "xgbProba":             metadata.get("xgb_proba", 0),
+                        "cameraFall":           metadata.get("camera_fall", False),
+                        "arduinoFall":          metadata.get("arduino_fall", False),
+                        "phoneFall":            metadata.get("phone_fall", False),
+                    },
                 },
-            },
-            timeout=5,
-        )
-        print(f"[spring] fall alert sent → seniorId={SENIOR_ID}")
-    except Exception as e:
-        print(f"[spring] fall alert failed: {e}")
+                timeout=5,
+            )
+            response.raise_for_status()
+            _spring_alert_cooldowns[senior_id] = time.time()
+            print(f"[spring] fall alert sent → seniorId={senior_id}")
+        except Exception as e:
+            print(f"[spring] fall alert failed: {e}")
 
 def sync_activity_to_spring():
     """활동 패턴 데이터를 Spring Boot에 주기적으로 동기화"""
@@ -161,6 +174,9 @@ fall_status = {
     "phone_status": "NORMAL",
     "phone_last_line": None,
     "phone_battery": None,
+    "phone_device_id": None,
+    "phone_senior_id": None,
+    "phone_updated_at": None,
     "score": 0,
     "last_capture": None,
     "battery": None,
@@ -173,6 +189,39 @@ camera_worker_started = False
 camera_worker_lock = threading.Lock()
 arduino_worker_started = False
 arduino_worker_lock = threading.Lock()
+phone_states = {}
+phone_states_lock = threading.Lock()
+
+
+def refresh_phone_fall_state():
+    """Expire stale phone signals and expose their aggregate state."""
+    now = time.time()
+    with phone_states_lock:
+        stale_ids = [
+            state_key
+            for state_key, state in phone_states.items()
+            if now - state["updated_at"] > PHONE_FALL_TTL_SEC
+        ]
+        for state_key in stale_ids:
+            del phone_states[state_key]
+
+        active_states = [
+            state for state in phone_states.values()
+            if state["senior_id"] == SENIOR_ID and state["status"] == "FALL"
+        ]
+        has_states = bool(phone_states)
+
+    fall_status["phone_fall"] = bool(active_states)
+    if active_states:
+        fall_status["phone_status"] = "FALL"
+        latest_active = max(active_states, key=lambda state: state["updated_at"])
+        fall_status["phone_senior_id"] = latest_active["senior_id"]
+    elif has_states:
+        fall_status["phone_status"] = "NORMAL"
+    elif fall_status.get("phone_status") == "FALL":
+        fall_status["phone_status"] = "STALE"
+    return bool(active_states)
+
 
 # Store a fall_status snapshot every minute.
 health_logger.start_logger_thread(fall_status)
@@ -279,27 +328,84 @@ def save_capture(frame, metadata=None):
     now = datetime.now()
     timestamp = now.strftime("%Y%m%d_%H%M%S_") + f"{now.microsecond // 1000:03d}"
     filename = f"captures/fall_{timestamp}.jpg"
+    event_metadata = dict(metadata or {})
+    event_metadata["captured_at"] = now.isoformat()
+    event_metadata["image"] = os.path.basename(filename)
 
     # Save a high-quality still image separately from the stream frame.
     cv2.imwrite(filename, frame, [cv2.IMWRITE_JPEG_QUALITY, 95])
 
     # Persist the event immediately so it is not missed between minute snapshots.
-    health_logger.log_fall_event(metadata or {}, capture_filename=os.path.basename(filename))
-
-    # Spring Boot에 낙상 알림 전송 (백그라운드)
-    threading.Thread(target=notify_spring_fall, args=(metadata or {},), daemon=True).start()
+    health_logger.log_fall_event(
+        event_metadata, capture_filename=os.path.basename(filename)
+    )
 
     # Save sidecar metadata next to the image.
-    if metadata:
+    if event_metadata:
         meta_filename = filename.replace(".jpg", ".json")
-        metadata["captured_at"] = now.isoformat()
-        metadata["image"] = os.path.basename(filename)
         with open(meta_filename, "w", encoding="utf-8") as f:
-            json.dump(metadata, f, ensure_ascii=False, indent=2)
+            json.dump(event_metadata, f, ensure_ascii=False, indent=2)
+
+    # Start transmission only after the image filename is present in metadata.
+    threading.Thread(
+        target=notify_spring_fall, args=(event_metadata,), daemon=True
+    ).start()
 
     fall_status["last_capture"] = filename
     print(f"[capture] saved {filename}")
     return filename
+
+
+def handle_phone_fall_fallback(state_key, device_id, signal_at):
+    """Report a phone fall even when the camera loop cannot produce a frame."""
+    time.sleep(PHONE_FALL_FALLBACK_DELAY_SEC)
+
+    with phone_states_lock:
+        state = phone_states.get(state_key)
+        if (
+            state is None
+            or state["status"] != "FALL"
+            or state["updated_at"] != signal_at
+        ):
+            return
+
+    # The camera path may already have reported the same fall while we waited.
+    senior_id = state["senior_id"]
+    with _spring_alert_lock:
+        already_reported = (
+            _spring_alert_cooldowns.get(senior_id, 0) >= signal_at
+        )
+    if already_reported:
+        return
+
+    metadata = {
+        "score": int(fall_status.get("score", 0)),
+        "posture": fall_status.get("posture", "unknown"),
+        "ensemble_mode": fall_status.get("ensemble_mode", ENSEMBLE_MODE),
+        "accident_by_stillness": False,
+        "xgb_proba": fall_status.get("xgb_proba", 0),
+        "camera_fall": bool(fall_status.get("camera_fall", False)),
+        "arduino_fall": bool(fall_status.get("arduino_fall", False)),
+        "phone_fall": True,
+        "phone_device_id": device_id,
+        "senior_id": senior_id,
+    }
+
+    with latest_frame_lock:
+        frame_bytes = latest_frame_bytes
+
+    if frame_bytes:
+        frame = cv2.imdecode(
+            np.frombuffer(frame_bytes, dtype=np.uint8), cv2.IMREAD_COLOR
+        )
+        if frame is not None:
+            save_capture(frame, metadata)
+            return
+
+    # No camera frame is available. Store and transmit a valid event without
+    # an image so the phone fall is never lost.
+    health_logger.log_fall_event(metadata, capture_filename=None)
+    notify_spring_fall(metadata)
 
 def generate_frames():
     global fall_start_time, videomae_frame_buffer, latest_frame_bytes
@@ -446,7 +552,10 @@ def generate_frames():
 
         camera_fall = fall_detected
         arduino_fall = bool(fall_status.get("arduino_fall", False))
-        phone_fall = bool(fall_status.get("phone_fall", False))
+        phone_fall = refresh_phone_fall_state()
+        phone_senior_id = (
+            fall_status.get("phone_senior_id") if phone_fall else None
+        )
         fall_detected = camera_fall or arduino_fall or phone_fall
 
         fall_status["fall_detected"] = fall_detected
@@ -496,6 +605,7 @@ def generate_frames():
                     "arduino_last_line": fall_status.get("arduino_last_line"),
                     "phone_fall": phone_fall,
                     "phone_status": fall_status.get("phone_status"),
+                    "senior_id": phone_senior_id or SENIOR_ID,
                 }
             elif total_score > event_max_score:
                 # Replace the event frame if a clearer/higher-score frame appears.
@@ -520,6 +630,7 @@ def generate_frames():
                     "arduino_last_line": fall_status.get("arduino_last_line"),
                     "phone_fall": phone_fall,
                     "phone_status": fall_status.get("phone_status"),
+                    "senior_id": phone_senior_id or SENIOR_ID,
                 }
 
             # Capture once per event after cooldown.
@@ -636,7 +747,10 @@ def on_startup():
         print(f"[arduino] WiFi mode — waiting for POST to /arduino/status")
     # 활동 데이터 Spring 동기화 루프 시작
     threading.Thread(target=_activity_sync_loop, daemon=True).start()
-    print(f"[spring] seniorId={SENIOR_ID}, springUrl={SPRING_URL}")
+    print(
+        f"[spring] seniorId={SENIOR_ID}, activityUrl={SPRING_URL}, "
+        f"fallAlertUrl={FALL_ALERT_SPRING_URL}"
+    )
 
 
 @app.get("/status")
@@ -712,9 +826,41 @@ def arduino_status(payload: dict):
 def phone_status(payload: dict):
     """폰 가속도계 낙상 감지(아두이노 대체): POST {"status": "FALL"} or {"status": "NORMAL"}"""
     raw = str(payload.get("status", "")).upper().strip()
+    if raw not in {"FALL", "NORMAL"}:
+        raise HTTPException(status_code=400, detail="status must be FALL or NORMAL")
+
+    try:
+        senior_id = int(payload.get("seniorId"))
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400, detail="seniorId is required")
+    if senior_id <= 0:
+        raise HTTPException(status_code=400, detail="seniorId must be positive")
+
+    device_id = str(payload.get("deviceId", "")).strip()
+    if not device_id:
+        raise HTTPException(status_code=400, detail="deviceId is required")
+    if PHONE_DEVICE_ID and device_id != PHONE_DEVICE_ID:
+        raise HTTPException(status_code=403, detail="deviceId is not allowed")
+
+    now = time.time()
+    state_key = (senior_id, device_id)
+    with phone_states_lock:
+        previous_state = phone_states.get(state_key)
+        is_new_fall = raw == "FALL" and (
+            previous_state is None or previous_state["status"] != "FALL"
+        )
+        phone_states[state_key] = {
+            "senior_id": senior_id,
+            "device_id": device_id,
+            "status": raw,
+            "updated_at": now,
+        }
+
     fall_status["phone_last_line"] = raw
     fall_status["phone_status"] = raw
-    fall_status["phone_fall"] = raw.startswith("FALL")
+    fall_status["phone_device_id"] = device_id
+    fall_status["phone_senior_id"] = senior_id
+    fall_status["phone_updated_at"] = now
 
     battery = payload.get("battery")
     if battery is not None:
@@ -723,7 +869,21 @@ def phone_status(payload: dict):
         except (ValueError, TypeError):
             pass
 
-    return {"ok": True, "received": raw}
+    active = refresh_phone_fall_state()
+    if is_new_fall:
+        threading.Thread(
+            target=handle_phone_fall_fallback,
+            args=(state_key, device_id, now),
+            daemon=True,
+        ).start()
+    return {
+        "ok": True,
+        "received": raw,
+        "seniorId": senior_id,
+        "deviceId": device_id,
+        "phoneFall": active,
+        "expiresInSec": PHONE_FALL_TTL_SEC,
+    }
 
 
 @app.get("/")
