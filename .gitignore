@@ -7,10 +7,17 @@ __pycache__/
 .env
 .env.*
 !.env.example
+.codex-wheel-check/
 
 # Generated captures and training output
 captures/
+phase2_features/features.npz
 runs/
+!runs/
+!runs/detect/
+!runs/detect/fall_detection_v3/
+!runs/detect/fall_detection_v3/weights/
+!runs/detect/fall_detection_v3/weights/best.pt
 
 # Local health records and machine-specific backups
 health_log.db

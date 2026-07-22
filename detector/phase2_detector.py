@@ -11,7 +11,6 @@ import mediapipe as mp
 import torch
 from pathlib import Path
 from detector.yolo_detector import model as yolo_model
-from detector.videomae_detector import processor as mae_processor, model as mae_model
 
 MODEL_PATH = Path(__file__).parent.parent / "phase2_features" / "xgboost_model.json"
 WINDOW = 8
@@ -39,7 +38,7 @@ POSTURE_TO_IDX = {"lying": 0, "sitting": 1, "standing": 2, "unknown": 3}
 class Phase2Detector:
     """Phase 2 XGBoost 실시간 추론 detector"""
 
-    def __init__(self, model_path=MODEL_PATH):
+    def __init__(self, model_path=MODEL_PATH, enable_videomae=True):
         if not Path(model_path).exists():
             raise FileNotFoundError(f"XGBoost 모델 없음: {model_path}")
         self.model = xgb.XGBClassifier()
@@ -50,10 +49,11 @@ class Phase2Detector:
         self.mae_buffer = []            # VideoMAE 16 프레임 버퍼
         self.last_mae_probs = [0.0, 0.0, 0.0, 0.0]
         self.frame_count = 0
+        self.enable_videomae = enable_videomae
 
     def _yolo_max_fall_conf(self, frame):
         """YOLO fall 클래스 raw 최고 신뢰도"""
-        results = yolo_model(frame, verbose=False)
+        results = yolo_model(frame, verbose=False, device="cpu")
         max_conf = 0.0
         for result in results:
             if result.boxes is None:
@@ -67,6 +67,8 @@ class Phase2Detector:
         return max_conf
 
     def _videomae_probs(self):
+        from detector.videomae_detector import load_videomae
+        mae_processor, mae_model = load_videomae()
         """VideoMAE 라벨별 확률 (FallDown, LyingDown, Sitting, Walking)"""
         if len(self.mae_buffer) < 16:
             return self.last_mae_probs
@@ -161,16 +163,19 @@ class Phase2Detector:
         frame_feat.append(self._yolo_max_fall_conf(frame))
 
         # VideoMAE 4개 - 16 프레임 버퍼링, 매 8 프레임마다 새로 계산
-        resized = cv2.resize(frame, (224, 224))
-        rgb_small = cv2.cvtColor(resized, cv2.COLOR_BGR2RGB)
-        self.mae_buffer.append(rgb_small)
-        if len(self.mae_buffer) > 16:
-            self.mae_buffer.pop(0)
         self.frame_count += 1
-        if len(self.mae_buffer) == 16 and self.frame_count % 8 == 0:
-            mae_probs = self._videomae_probs()
+        if self.enable_videomae:
+            resized = cv2.resize(frame, (224, 224))
+            rgb_small = cv2.cvtColor(resized, cv2.COLOR_BGR2RGB)
+            self.mae_buffer.append(rgb_small)
+            if len(self.mae_buffer) > 16:
+                self.mae_buffer.pop(0)
+            if len(self.mae_buffer) == 16 and self.frame_count % 8 == 0:
+                mae_probs = self._videomae_probs()
+            else:
+                mae_probs = self.last_mae_probs
         else:
-            mae_probs = self.last_mae_probs
+            mae_probs = [0.0, 0.0, 0.0, 0.0]
         frame_feat.extend(mae_probs)
 
         return frame_feat

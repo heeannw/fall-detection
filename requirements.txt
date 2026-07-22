@@ -1,0 +1,16 @@
+--extra-index-url https://download.pytorch.org/whl/cpu
+
+# ZeroGPU supports PyTorch 2.8+. CPU wheels are intentional: realtime inference
+# does not request dynamic GPU allocations.
+torch==2.8.0+cpu
+torchvision==0.23.0+cpu
+
+fastrtc==0.0.34
+gradio==5.49.1
+mediapipe==0.10.21
+numpy==1.26.4
+opencv-python-headless==4.11.0.86
+requests==2.32.4
+transformers==4.53.2
+ultralytics==8.3.169
+xgboost==3.0.2

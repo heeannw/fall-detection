@@ -1,0 +1,11 @@
+.git
+venv
+.venv
+__pycache__
+captures
+health_log.db
+phase2_features/features.npz
+yolov8n.pt
+yolov8n-pose.pt
+*.wav
+*.tflite
