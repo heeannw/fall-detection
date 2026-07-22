@@ -13,6 +13,68 @@ import spaces
 from detector.webrtc_detector import WebRTCFallDetector
 
 
+RESPONSIVE_CSS = """
+html, body, gradio-app {
+    height: auto !important;
+    min-height: 100% !important;
+    overflow-y: auto !important;
+}
+
+.gradio-container, main.fillable {
+    height: auto !important;
+    min-height: 100vh !important;
+    overflow: visible !important;
+}
+
+.video-container {
+    width: 100% !important;
+    height: auto !important;
+    max-height: none !important;
+    overflow: visible !important;
+}
+
+.video-container .wrap {
+    position: relative !important;
+    inset: auto !important;
+    display: flex !important;
+    flex-direction: column !important;
+    width: 100% !important;
+    height: auto !important;
+    min-height: 0 !important;
+}
+
+.video-container video {
+    position: static !important;
+    width: 100% !important;
+    height: auto !important;
+    max-height: min(65vh, 560px) !important;
+    aspect-ratio: 16 / 9 !important;
+    object-fit: contain !important;
+    background: #000;
+}
+
+.video-container .button-wrap {
+    position: static !important;
+    inset: auto !important;
+    transform: none !important;
+    flex: 0 0 auto !important;
+    justify-content: center !important;
+    margin: 0.75rem auto 1rem !important;
+}
+
+footer {
+    position: static !important;
+    flex: 0 0 auto !important;
+    margin-top: 1rem !important;
+}
+
+@media (max-width: 640px) {
+    .video-container video { aspect-ratio: 4 / 3 !important; }
+    .video-container .button-wrap { width: 100% !important; }
+}
+"""
+
+
 @spaces.GPU
 def zerogpu_probe():
     """ZeroGPU startup probe; never used by the realtime WebRTC handler."""
@@ -30,9 +92,11 @@ stream = Stream(
     ui_args={
         "title": "Real-time Fall Detection",
         "subtitle": "Browser webcam / MediaPipe + YOLO + XGBoost",
+        "full_screen": False,
     },
 )
 demo = stream.ui
+demo.css = RESPONSIVE_CSS
 
 if __name__ == "__main__":
     demo.launch(
