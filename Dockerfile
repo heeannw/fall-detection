@@ -12,7 +12,7 @@ ENV HOME=/home/user \
     FALL_YOLO_MODEL=/home/user/app/runs/detect/fall_detection_v3/weights/best.pt \
     FALL_ENABLE_VIDEOMAE=false \
     FALL_PROCESS_EVERY_N_FRAMES=3 \
-    FALL_INPUT_SIZE=480
+    FALL_INPUT_SIZE=384
 WORKDIR /home/user/app
 
 COPY --chown=user requirements-space.txt .

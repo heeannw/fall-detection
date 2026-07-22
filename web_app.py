@@ -6,6 +6,7 @@ import os
 # Do not add @spaces.GPU to the per-frame WebRTC handler.
 os.environ.setdefault("CUDA_VISIBLE_DEVICES", "")
 os.environ.setdefault("FALL_ENABLE_VIDEOMAE", "false")
+os.environ.setdefault("FALL_INPUT_SIZE", "384")
 
 from fastrtc import Stream, VideoStreamHandler, get_turn_credentials
 import spaces
@@ -18,6 +19,7 @@ html, body, gradio-app {
     height: auto !important;
     min-height: 100% !important;
     overflow-y: auto !important;
+    scrollbar-gutter: stable;
 }
 
 .gradio-container, main.fillable {
@@ -27,10 +29,19 @@ html, body, gradio-app {
 }
 
 .video-container {
-    width: 100% !important;
+    width: min(100%, 900px, calc(65vh * 4 / 3)) !important;
+    max-width: 900px !important;
     height: auto !important;
-    max-height: none !important;
+    max-height: 65vh !important;
+    aspect-ratio: 4 / 3 !important;
     overflow: visible !important;
+    margin-inline: auto !important;
+}
+
+.video-container,
+.video-container * {
+    transition: none !important;
+    animation: none !important;
 }
 
 .video-container .wrap {
@@ -39,7 +50,7 @@ html, body, gradio-app {
     display: flex !important;
     flex-direction: column !important;
     width: 100% !important;
-    height: auto !important;
+    height: 100% !important;
     min-height: 0 !important;
 }
 
@@ -48,7 +59,7 @@ html, body, gradio-app {
     width: 100% !important;
     height: auto !important;
     max-height: min(65vh, 560px) !important;
-    aspect-ratio: 16 / 9 !important;
+    aspect-ratio: 4 / 3 !important;
     object-fit: contain !important;
     background: #000;
 }
@@ -69,7 +80,6 @@ footer {
 }
 
 @media (max-width: 640px) {
-    .video-container video { aspect-ratio: 4 / 3 !important; }
     .video-container .button-wrap { width: 100% !important; }
 }
 """

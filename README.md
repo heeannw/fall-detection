@@ -50,7 +50,7 @@ docker run --rm -p 7860:7860 --env-file .env fall-webrtc
 ## CPU tuning
 
 - Increase `FALL_PROCESS_EVERY_N_FRAMES` from 3 to 4 or 5 if inference lags.
-- Reduce `FALL_INPUT_SIZE` from 480 to 384 to save CPU at some accuracy cost.
+- `FALL_INPUT_SIZE` defaults to 384 for CPU inference; WebRTC output remains 640x480.
 - `FALL_CONFIRM_FRAMES` controls consecutive sampled positives before alerting.
 - `FALL_XGBOOST_THR` controls the XGBoost probability threshold.
 

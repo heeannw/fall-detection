@@ -12,6 +12,9 @@ from detector.mediapipe_detector import detect_fall_mediapipe, get_threshold_for
 from detector.phase2_detector import Phase2Detector
 from detector.spring_alert import SpringFallNotifier
 
+OUTPUT_WIDTH = 640
+OUTPUT_HEIGHT = 480
+
 
 def _flag(name, default=False):
     return os.getenv(name, str(default)).lower() in {"1", "true", "yes", "on"}
@@ -20,7 +23,7 @@ def _flag(name, default=False):
 class WebRTCFallDetector:
     def __init__(self):
         self.process_every = max(1, int(os.getenv("FALL_PROCESS_EVERY_N_FRAMES", "3")))
-        self.input_size = max(256, int(os.getenv("FALL_INPUT_SIZE", "480")))
+        self.input_size = max(256, int(os.getenv("FALL_INPUT_SIZE", "384")))
         self.xgb_threshold = float(os.getenv("FALL_XGBOOST_THR", "0.70"))
         self.confirm_frames = max(1, int(os.getenv("FALL_CONFIRM_FRAMES", "3")))
         self.enable_videomae = _flag("FALL_ENABLE_VIDEOMAE")
@@ -43,12 +46,48 @@ class WebRTCFallDetector:
             print("[webrtc] handler received first frame", flush=True)
             self.first_handler_frame_logged = True
         if image is None or image.size == 0:
-            return image
+            return np.zeros((OUTPUT_HEIGHT, OUTPUT_WIDTH, 3), dtype=np.uint8)
         with self.lock:
             self.frame_no += 1
             if self.frame_no % self.process_every == 0:
                 self._infer(image)
-            return self._overlay(image.copy())
+            return self._overlay(self._letterbox_output(image))
+
+    def _letterbox_output(self, image):
+        """Return a stable 640x480 frame without stretching the source image."""
+        frame = np.asarray(image)
+        if frame.ndim == 2:
+            frame = cv2.cvtColor(frame, cv2.COLOR_GRAY2BGR)
+        elif frame.ndim != 3 or frame.shape[2] == 0:
+            return np.zeros((OUTPUT_HEIGHT, OUTPUT_WIDTH, 3), dtype=np.uint8)
+        elif frame.shape[2] == 4:
+            frame = cv2.cvtColor(frame, cv2.COLOR_BGRA2BGR)
+        elif frame.shape[2] != 3:
+            frame = frame[:, :, :3]
+
+        if frame.dtype != np.uint8:
+            frame = np.clip(frame, 0, 255).astype(np.uint8)
+
+        source_height, source_width = frame.shape[:2]
+        if source_height == 0 or source_width == 0:
+            return np.zeros((OUTPUT_HEIGHT, OUTPUT_WIDTH, 3), dtype=np.uint8)
+
+        scale = min(OUTPUT_WIDTH / source_width, OUTPUT_HEIGHT / source_height)
+        resized_width = max(1, min(OUTPUT_WIDTH, round(source_width * scale)))
+        resized_height = max(1, min(OUTPUT_HEIGHT, round(source_height * scale)))
+        interpolation = cv2.INTER_AREA if scale < 1 else cv2.INTER_LINEAR
+        resized = cv2.resize(
+            frame, (resized_width, resized_height), interpolation=interpolation
+        )
+
+        canvas = np.zeros((OUTPUT_HEIGHT, OUTPUT_WIDTH, 3), dtype=np.uint8)
+        offset_x = (OUTPUT_WIDTH - resized_width) // 2
+        offset_y = (OUTPUT_HEIGHT - resized_height) // 2
+        canvas[
+            offset_y:offset_y + resized_height,
+            offset_x:offset_x + resized_width,
+        ] = resized
+        return canvas
 
     def _infer(self, rgb):
         if not self.first_inference_logged:
