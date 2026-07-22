@@ -33,6 +33,7 @@ class WebRTCFallDetector:
         self.notifier = SpringFallNotifier()
         self.lock = threading.Lock()
         self.frame_no = 0
+        self.first_inference_logged = False
         self.positive_frames = 0
         self.last_result = {"fall": False, "score": 0, "xgb": 0.0, "posture": "unknown"}
 
@@ -46,6 +47,9 @@ class WebRTCFallDetector:
             return self._overlay(image.copy())
 
     def _infer(self, rgb):
+        if not self.first_inference_logged:
+            print("[webrtc] first frame received", flush=True)
+            self.first_inference_logged = True
         height, width = rgb.shape[:2]
         scale = min(1.0, self.input_size / max(height, width))
         work_rgb = cv2.resize(rgb, (int(width * scale), int(height * scale))) if scale < 1.0 else rgb
