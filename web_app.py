@@ -8,8 +8,15 @@ os.environ.setdefault("CUDA_VISIBLE_DEVICES", "")
 os.environ.setdefault("FALL_ENABLE_VIDEOMAE", "false")
 
 from fastrtc import Stream, get_turn_credentials
+import spaces
 
 from detector.webrtc_detector import WebRTCFallDetector
+
+
+@spaces.GPU
+def zerogpu_probe():
+    """ZeroGPU startup probe; never used by the realtime WebRTC handler."""
+    return "ZeroGPU ready"
 
 
 def rtc_configuration():
