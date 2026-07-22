@@ -33,11 +33,15 @@ class WebRTCFallDetector:
         self.notifier = SpringFallNotifier()
         self.lock = threading.Lock()
         self.frame_no = 0
+        self.first_handler_frame_logged = False
         self.first_inference_logged = False
         self.positive_frames = 0
         self.last_result = {"fall": False, "score": 0, "xgb": 0.0, "posture": "unknown"}
 
     def __call__(self, image: np.ndarray) -> np.ndarray:
+        if not self.first_handler_frame_logged:
+            print("[webrtc] handler received first frame", flush=True)
+            self.first_handler_frame_logged = True
         if image is None or image.size == 0:
             return image
         with self.lock:
@@ -48,7 +52,7 @@ class WebRTCFallDetector:
 
     def _infer(self, rgb):
         if not self.first_inference_logged:
-            print("[webrtc] first frame received", flush=True)
+            print("[webrtc] first inference started", flush=True)
             self.first_inference_logged = True
         height, width = rgb.shape[:2]
         scale = min(1.0, self.input_size / max(height, width))

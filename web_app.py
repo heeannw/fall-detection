@@ -7,7 +7,7 @@ import os
 os.environ.setdefault("CUDA_VISIBLE_DEVICES", "")
 os.environ.setdefault("FALL_ENABLE_VIDEOMAE", "false")
 
-from fastrtc import Stream, get_turn_credentials
+from fastrtc import Stream, VideoStreamHandler, get_turn_credentials
 import spaces
 
 from detector.webrtc_detector import WebRTCFallDetector
@@ -19,21 +19,14 @@ def zerogpu_probe():
     return "ZeroGPU ready"
 
 
-def rtc_configuration():
-    """Use hosted TURN on Spaces; localhost works without TURN credentials."""
-    if os.getenv("HF_TOKEN") or os.getenv("CLOUDFLARE_TURN_KEY_ID"):
-        return get_turn_credentials()
-    return None
-
-
 detector = WebRTCFallDetector()
 stream = Stream(
-    handler=detector,
+    handler=VideoStreamHandler(detector, skip_frames=True),
     modality="video",
     mode="send-receive",
     concurrency_limit=1,
     time_limit=int(os.getenv("FALL_SESSION_TIME_LIMIT_SEC", "900")),
-    rtc_configuration=rtc_configuration,
+    rtc_configuration=get_turn_credentials,
     ui_args={
         "title": "Real-time Fall Detection",
         "subtitle": "Browser webcam / MediaPipe + YOLO + XGBoost",
